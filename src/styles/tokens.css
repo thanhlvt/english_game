@@ -1,0 +1,34 @@
+/* Design token duy nhất của app. KHÔNG hardcode màu / bo góc ở nơi khác. */
+:root{
+  /* màu giấy dán */
+  --paper:#FFF9EC;
+  --ink:#2B2140;
+  --berry:#FF5A7E;
+  --sky:#3EC1E0;
+  --leaf:#57CC7A;
+  --sun:#FFC93C;
+  --grape:#9B7BEA;
+  --cream:#FFF0C9;
+  --white:#FFFFFF;
+
+  /* bo góc + viền cắt giấy */
+  --r-lg:22px;
+  --r-md:18px;
+  --r-sm:14px;
+  --bd:3px;
+  --lift:6px;          /* độ cao bóng cứng */
+
+  /* khoảng cách */
+  --sp-1:6px; --sp-2:10px; --sp-3:14px; --sp-4:18px; --sp-5:26px;
+
+  /* chữ */
+  --font-disp:'Baloo 2',system-ui,sans-serif;
+  --font-body:'Nunito',system-ui,sans-serif;
+  --fs-title:clamp(20px,5.2vw,28px);
+  --fs-word:clamp(34px,9vw,52px);
+  --fs-body:16px;
+  --fs-note:13px;
+
+  /* vùng chạm tối thiểu cho trẻ 5-7 tuổi */
+  --touch:56px;
+}
