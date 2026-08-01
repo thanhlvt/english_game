@@ -1,29 +1,34 @@
 /**
  * Xưởng kể chuyện - hoạt động SÁNG TẠO, không có đúng/sai.
- * Bé dán hình vào tranh, ghép câu từ 3 nhóm thẻ, nghe máy đọc và lưu truyện.
+ * Bé ghép câu từ các nhóm thẻ (chủ ngữ, trạng thái/hành động, địa điểm), nghe máy đọc và lưu truyện.
+ * Khi đọc câu/truyện, tranh minh hoạ hiện đúng nội dung câu vừa ghép.
  * Khác các activity khác: không gắn với 1 chủ đề, dùng từ của toàn app.
  */
-import { paint, topBar, on, $, confetti, refreshStars } from '../core/ui.js';
-import { say, sayWord, sfx } from '../core/audio.js';
+import { paint, topBar, on, $, $$, confetti, refreshStars } from '../core/ui.js';
+import { say, sfx } from '../core/audio.js';
 import { addStars, saveStory, listStories, deleteStory } from '../core/storage.js';
-import { allTopics, allWords } from '../core/content.js';
+import { allTopics } from '../core/content.js';
 
-/* Khung câu. Muốn thêm mẫu câu mới thì sửa 3 mảng này. */
-const VERBS = [
+/* Khung câu. Muốn thêm mẫu câu mới thì sửa các mảng này.
+   Trạng thái và Hành động loại trừ nhau: câu chỉ có 1 trong 2, chọn bên này sẽ bỏ chọn bên kia. */
+const STATES = [
   { t: 'is happy', e: '😊' }, { t: 'is sad', e: '😢' }, { t: 'is big', e: '🐘' },
-  { t: 'is small', e: '🐭' }, { t: 'is funny', e: '🤪' }, { t: 'can jump', e: '🦘' },
-  { t: 'can fly', e: '🕊️' }, { t: 'can run', e: '🏃' }, { t: 'can swim', e: '🏊' },
-  { t: 'can sing', e: '🎵' }
+  { t: 'is small', e: '🐭' }, { t: 'is funny', e: '🤪' }, { t: 'is tired', e: '😴' },
+  { t: 'is hungry', e: '😋' }, { t: 'is thirsty', e: '🥤' }, { t: 'is scared', e: '😱' },
+  { t: 'is cold', e: '🥶' }
+];
+const ACTIONS = [
+  { t: 'can jump', e: '🦘' }, { t: 'can fly', e: '🕊️' }, { t: 'can run', e: '🏃' },
+  { t: 'can swim', e: '🏊' }, { t: 'can sing', e: '🎵' }, { t: 'can dance', e: '💃' },
+  { t: 'can climb', e: '🧗' }, { t: 'can walk', e: '🚶' }, { t: 'can eat', e: '🍎' },
+  { t: 'can drink', e: '🥛' }
 ];
 const PLACES = [
   { t: '', e: '—' }, { t: 'in the house', e: '🏠' }, { t: 'on the tree', e: '🌳' },
   { t: 'in the water', e: '💧' }, { t: 'under the sun', e: '☀️' },
-  { t: 'with mother', e: '👩' }, { t: 'at night', e: '🌙' }
-];
-const BACKGROUNDS = [
-  { id: 'park', label: '🌳 Công viên' },
-  { id: 'sea', label: '🌊 Biển' },
-  { id: 'night', label: '🌙 Đêm' }
+  { t: 'with mother', e: '👩' }, { t: 'with father', e: '👨' }, { t: 'at night', e: '🌙' },
+  { t: 'in the garden', e: '🌻' }, { t: 'at the beach', e: '🏖️' }, { t: 'in the sky', e: '☁️' },
+  { t: 'at school', e: '🏫' }
 ];
 
 /* Chủ ngữ lấy từ chủ đề con vật + gia đình */
@@ -31,50 +36,82 @@ const subjects = () => allTopics()
   .filter(t => ['animals', 'family'].includes(t.id))
   .flatMap(t => t.words);
 
+/** Chuẩn hoá 1 dòng truyện (hỗ trợ cả truyện cũ chỉ có chuỗi chữ). */
+const asLine = l => typeof l === 'string' ? { text: l, emojis: [] } : l;
+
+function renderPicture(items) {
+  if (!items || !items.length) {
+    return `<p class="hint">Ghép câu rồi bấm "🔊 Đọc câu" để xem tranh minh hoạ nhé!</p>`;
+  }
+  return items.map(it => `
+    <div class="scene-line">
+      <div class="scene-emojis">${(it.emojis && it.emojis.length ? it.emojis : ['📖']).join(' ')}</div>
+      <div class="scene-text">${it.text}</div>
+    </div>`).join('');
+}
+
 export default {
   id: 'story-studio',
   vi: 'Xưởng kể chuyện',
-  desc: 'Dán hình, ghép câu, nghe máy đọc truyện của bé',
+  desc: 'Ghép câu, nghe máy đọc và xem tranh minh hoạ truyện của bé',
   icon: '🎨',
   standalone: true,          // không hiện trong menu của từng chủ đề
   minWords: 0,
 
   mount({ back }) {
     const SUBJ = subjects();
-    const stickerPool = allWords();
-    const st = { bg: 'park', stickers: [], subj: 0, verb: 0, place: 0, lines: [] };
+    const st = { subj: 0, mood: { kind: 'state', index: 0 }, place: 0, lines: [], picture: null };
 
-    const sentence = () => {
-      const s = SUBJ[st.subj], v = VERBS[st.verb], p = PLACES[st.place];
+    const mood = () => (st.mood.kind === 'state' ? STATES : ACTIONS)[st.mood.index];
+    const current = () => ({ s: SUBJ[st.subj], v: mood(), p: PLACES[st.place] });
+    const sentenceText = () => {
+      const { s, v, p } = current();
       return `The ${s.en} ${v.t}${p.t ? ' ' + p.t : ''}.`;
     };
+    const sentenceItem = () => {
+      const { s, v, p } = current();
+      const emojis = [s.emoji, v.e];
+      if (p.t) emojis.push(p.e);
+      return { text: sentenceText(), emojis };
+    };
+
+    /** Chỉ cập nhật DOM tại chỗ (không paint lại) để không giật trang lên đầu. */
+    function updateSentenceUI() {
+      $('#sentence').textContent = sentenceText();
+      ['subj', 'place'].forEach(k => {
+        $$(`[data-${k}]`).forEach(el => el.classList.toggle('on', Number(el.dataset[k]) === st[k]));
+      });
+      $$('[data-state]').forEach(el =>
+        el.classList.toggle('on', st.mood.kind === 'state' && Number(el.dataset.state) === st.mood.index));
+      $$('[data-action]').forEach(el =>
+        el.classList.toggle('on', st.mood.kind === 'action' && Number(el.dataset.action) === st.mood.index));
+    }
+
+    function updatePicture(items) {
+      st.picture = items;
+      $('#scene').innerHTML = renderPicture(items);
+    }
 
     function draw() {
       const saved = listStories();
       paint(topBar('🎨 Xưởng kể chuyện', back) + `
-        <div class="row wide" style="margin-bottom:var(--sp-3)">
-          ${BACKGROUNDS.map(b => `<button class="btn small" data-bg="${b.id}">${b.label}</button>`).join('')}
-        </div>
-        <div class="scene ${st.bg}" id="scene"></div>
-
-        <div class="lbl-sm">Dán hình vào tranh</div>
-        <div class="tray">
-          ${stickerPool.map((w, i) => `<button data-w="${i}" title="${w.en}" aria-label="${w.en}">${w.emoji}</button>`).join('')}
-        </div>
-        <div class="row wide" style="margin-top:var(--sp-2)">
-          <button class="btn small" data-undo>↩︎ Bỏ hình cuối</button>
-          <button class="btn small" data-clear>🧹 Xóa hết hình</button>
-        </div>
+        <div class="scene" id="scene">${renderPicture(st.picture)}</div>
 
         <div class="lbl-sm">Ghép câu của bé</div>
+        <div class="lbl-sm">Chủ ngữ</div>
         <div class="chips">${SUBJ.map((w, i) =>
           `<button class="chip ${i === st.subj ? 'on' : ''}" data-subj="${i}">${w.emoji} ${w.en}</button>`).join('')}</div>
-        <div class="chips" style="margin-top:8px">${VERBS.map((v, i) =>
-          `<button class="chip ${i === st.verb ? 'on' : ''}" data-verb="${i}">${v.e} ${v.t}</button>`).join('')}</div>
-        <div class="chips" style="margin-top:8px">${PLACES.map((p, i) =>
+        <div class="lbl-sm">Trạng thái</div>
+        <div class="chips">${STATES.map((v, i) =>
+          `<button class="chip ${st.mood.kind === 'state' && i === st.mood.index ? 'on' : ''}" data-state="${i}">${v.e} ${v.t}</button>`).join('')}</div>
+        <div class="lbl-sm">Hành động</div>
+        <div class="chips">${ACTIONS.map((v, i) =>
+          `<button class="chip ${st.mood.kind === 'action' && i === st.mood.index ? 'on' : ''}" data-action="${i}">${v.e} ${v.t}</button>`).join('')}</div>
+        <div class="lbl-sm">Nơi chốn</div>
+        <div class="chips">${PLACES.map((p, i) =>
           `<button class="chip ${i === st.place ? 'on' : ''}" data-place="${i}">${p.e} ${p.t || '(không)'}</button>`).join('')}</div>
 
-        <div class="cut sentence" style="margin-top:var(--sp-3)">${sentence()}</div>
+        <div class="cut sentence" id="sentence" style="margin-top:var(--sp-3)">${sentenceText()}</div>
         <div class="row wide" style="margin-top:var(--sp-2)">
           <button class="btn speak" data-read>🔊 Đọc câu</button>
           <button class="btn" data-add>＋ Thêm vào truyện</button>
@@ -83,7 +120,7 @@ export default {
         ${st.lines.length ? `
           <div class="lbl-sm">Truyện đang viết (${st.lines.length} câu)</div>
           <div class="storylist">${st.lines.map((l, i) =>
-            `<div class="storyline"><span>${i + 1}.</span> ${l}</div>`).join('')}</div>
+            `<div class="storyline"><span>${i + 1}.</span> ${l.text}</div>`).join('')}</div>
           <div class="row wide" style="margin-top:var(--sp-2)">
             <button class="btn speak" data-readall>📖 Đọc cả truyện</button>
             <button class="btn small" data-keep>💾 Cất vào tủ truyện</button>
@@ -100,67 +137,35 @@ export default {
              </div>`).join('')}</div>` : ''}
         <div style="height:20px"></div>`);
 
-      const scene = $('#scene');
-      st.stickers.forEach(s => scene.appendChild(makeSticker(s)));
-
-      on('[data-bg]', el => { st.bg = el.dataset.bg; draw(); });
-      on('[data-w]', el => {
-        const w = stickerPool[Number(el.dataset.w)];
-        st.stickers.push({ emoji: w.emoji, en: w.en, x: 20 + Math.random() * 60, y: 25 + Math.random() * 55 });
-        sayWord(w); draw();
+      on('[data-subj]', el => { st.subj = Number(el.dataset.subj); updateSentenceUI(); });
+      on('[data-state]', el => { st.mood = { kind: 'state', index: Number(el.dataset.state) }; updateSentenceUI(); });
+      on('[data-action]', el => { st.mood = { kind: 'action', index: Number(el.dataset.action) }; updateSentenceUI(); });
+      on('[data-place]', el => { st.place = Number(el.dataset.place); updateSentenceUI(); });
+      on('[data-read]', () => {
+        const item = sentenceItem();
+        updatePicture([item]);
+        say(item.text, 0.7);
       });
-      on('[data-undo]', () => { st.stickers.pop(); draw(); });
-      on('[data-clear]', () => { st.stickers = []; draw(); });
-      on('[data-subj]', el => { st.subj = Number(el.dataset.subj); draw(); });
-      on('[data-verb]', el => { st.verb = Number(el.dataset.verb); draw(); });
-      on('[data-place]', el => { st.place = Number(el.dataset.place); draw(); });
-      on('[data-read]', () => say(sentence(), 0.7));
       on('[data-add]', () => {
-        st.lines.push(sentence());
+        st.lines.push(sentenceItem());
         sfx.ok(); addStars(1); refreshStars(); confetti(); draw();
       });
-      on('[data-readall]', () => say(st.lines.join(' '), 0.68));
+      on('[data-readall]', () => {
+        updatePicture(st.lines.slice());
+        say(st.lines.map(l => l.text).join(' '), 0.68);
+      });
       on('[data-keep]', () => {
-        saveStory({ lines: st.lines.slice(), bg: st.bg, stickers: st.stickers.slice() });
-        st.lines = []; sfx.win(); confetti(); draw();
+        saveStory({ lines: st.lines.slice() });
+        st.lines = []; st.picture = null; sfx.win(); confetti(); draw();
       });
       on('[data-open]', el => {
         const s = listStories().find(x => x.id === el.dataset.open);
-        if (s) say(s.lines.join(' '), 0.68);
+        if (!s) return;
+        const items = s.lines.map(asLine);
+        updatePicture(items);
+        say(items.map(l => l.text).join(' '), 0.68);
       });
       on('[data-del]', el => { deleteStory(el.dataset.del); draw(); });
-    }
-
-    function makeSticker(s) {
-      const el = document.createElement('div');
-      el.className = 'sticker';
-      el.textContent = s.emoji;
-      el.style.left = s.x + '%';
-      el.style.top = s.y + '%';
-      let moved = false;
-      el.addEventListener('pointerdown', e => {
-        e.preventDefault();
-        moved = false;
-        el.setPointerCapture(e.pointerId);
-        el.classList.add('drag');
-        const box = el.parentElement.getBoundingClientRect();
-        const move = ev => {
-          moved = true;
-          s.x = Math.max(4, Math.min(96, (ev.clientX - box.left) / box.width * 100));
-          s.y = Math.max(6, Math.min(94, (ev.clientY - box.top) / box.height * 100));
-          el.style.left = s.x + '%';
-          el.style.top = s.y + '%';
-        };
-        const up = () => {
-          el.classList.remove('drag');
-          el.removeEventListener('pointermove', move);
-          el.removeEventListener('pointerup', up);
-          if (!moved) say(s.en);
-        };
-        el.addEventListener('pointermove', move);
-        el.addEventListener('pointerup', up);
-      });
-      return el;
     }
 
     draw();

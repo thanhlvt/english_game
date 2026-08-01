@@ -87,7 +87,7 @@ export default {
   stars: 0,
   words:  { 'animals.cat': { seen, ok, no, box /*0..4*/, lastAt } },
   topics: { animals: { plays: {flashcards: 3}, best: {} } },
-  stories: [ { id, createdAt, lines, bg, stickers } ],
+  stories: [ { id, createdAt, lines /* [{text, emojis}] */ } ],
   settings: { rate, sfx, showVietnamese }
 }
 ```
